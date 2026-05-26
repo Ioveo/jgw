@@ -1,0 +1,64 @@
+name: OCI Auto Grabber (甲骨文全自动抢机)
+
+on:
+  schedule:
+    # UTC 时间每 30 分钟执行一次（北京时间 = UTC+8）
+    - cron: '*/30 * * * *'
+  workflow_dispatch: # 支持手动在 Actions 页面一键触发
+
+jobs:
+  grab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 28   # 强制 28 分钟后超时退出，防止卡住占用下一轮
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
+
+      - name: Build CLI
+        run: go build -o oci-grabber-cli .
+
+      - name: 🚀 Start Grabbing
+        # 所有配置通过环境变量注入，程序检测不到 config.toml 时自动读取这些变量
+        env:
+          # ── 鉴权 (必填，存入 GitHub Secrets) ──────────────────────────────
+          OCI_TENANCY_OCID:           ${{ secrets.OCI_TENANCY_OCID }}
+          OCI_USER_OCID:              ${{ secrets.OCI_USER_OCID }}
+          OCI_FINGERPRINT:            ${{ secrets.OCI_FINGERPRINT }}
+          # 将你的 .pem 文件全文内容（含 BEGIN/END 行）粘贴到 Secret 中
+          OCI_PRIVATE_KEY_CONTENT:    ${{ secrets.OCI_PRIVATE_KEY_CONTENT }}
+          OCI_REGION:                 ${{ secrets.OCI_REGION }}
+          OCI_COMPARTMENT_ID:         ${{ secrets.OCI_COMPARTMENT_ID }}
+          OCI_SSH_PUBLIC_KEY:         ${{ secrets.OCI_SSH_PUBLIC_KEY }}
+
+          # ── 实例规格 (可在此直接修改，无需放入 Secrets) ───────────────────
+          OCI_DISPLAY_NAME:           "free-arm-github-01"
+          OCI_SHAPE:                  "VM.Standard.A1.Flex"
+          OCI_OCPUS:                  "4"
+          OCI_MEMORY_GB:              "24"
+          OCI_ASSIGN_PUBLIC_IP:       "true"
+
+          # 留空 → 程序自动搜索最新 Ubuntu ARM 镜像 + 默认子网
+          OCI_IMAGE_ID:               ""
+          OCI_SUBNET_ID:              ""
+
+          # ── 调度参数 ──────────────────────────────────────────────────────
+          # 每轮 Action 最多尝试 25 次（约 25 分钟），配合 30 分钟 cron 无缝轮转
+          OCI_INTERVAL_SECONDS:       "60"
+          OCI_JITTER_SECONDS:         "10"
+          OCI_MAX_BACKOFF_SECONDS:    "120"
+          OCI_MAX_ATTEMPTS:           "25"
+
+          # ── 通知 (可选，填入 Secrets) ─────────────────────────────────────
+          OCI_WEBHOOK_URL:            ${{ secrets.OCI_WEBHOOK_URL }}
+          OCI_TG_BOT_TOKEN:           ${{ secrets.OCI_TG_BOT_TOKEN }}
+          OCI_TG_CHAT_ID:             ${{ secrets.OCI_TG_CHAT_ID }}
+
+        # 不传 -config，程序找不到默认的 config.toml 后自动切换到环境变量模式
+        run: ./oci-grabber-cli

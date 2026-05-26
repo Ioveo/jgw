@@ -1,0 +1,21 @@
+# Compiled Binaries
+*.exe
+oci-grabber-cli
+oci-grabber-gui
+oci-setup
+
+# Local Configurations & Private Keys (CRITICAL SECURITY)
+config.toml
+*.pem
+
+# Logs
+*.log
+logs/
+
+# Editor & System Files
+.idea/
+.vscode/
+.opencode/
+.tools/
+.DS_Store
+Thumbs.db
