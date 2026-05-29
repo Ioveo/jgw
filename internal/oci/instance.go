@@ -16,6 +16,7 @@ type InstanceConfig struct {
 	OCPUs              float64
 	MemoryGB           float64
 	ImageID            string
+	ImageFilter        string // 模糊匹配镜像的名称过滤器，如 "ubuntu 22.04"
 	SubnetID           string
 	AssignPublicIP     bool
 	SSHPublicKey       string

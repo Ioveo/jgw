@@ -35,6 +35,7 @@ type InstanceConfig struct {
 	OCPUs              float64 `toml:"ocpus"`
 	MemoryGB           float64 `toml:"memory_gb"`
 	ImageID            string  `toml:"image_id"`
+	ImageFilter        string  `toml:"image_filter"`
 	SubnetID           string  `toml:"subnet_id"`
 	AssignPublicIP     bool    `toml:"assign_public_ip"`
 	SSHPublicKey       string  `toml:"ssh_public_key"`
@@ -77,6 +78,7 @@ func Load(path string) (*Config, error) {
 			cfg.Instance.DisplayName = logEnv("OCI_DISPLAY_NAME")
 			cfg.Instance.Shape = logEnv("OCI_SHAPE")
 			cfg.Instance.ImageID = logEnv("OCI_IMAGE_ID")
+			cfg.Instance.ImageFilter = logEnv("OCI_IMAGE_FILTER")
 			cfg.Instance.SubnetID = logEnv("OCI_SUBNET_ID")
 			cfg.Instance.SSHPublicKey = logEnv("OCI_SSH_PUBLIC_KEY")
 

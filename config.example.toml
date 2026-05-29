@@ -14,8 +14,11 @@ display_name     = "free-arm-01"
 shape            = "VM.Standard.A1.Flex"
 ocpus            = 4
 memory_gb        = 24
-# 镜像 ID（Ubuntu 22.04 ARM 为例，需与 region 匹配，可从控制台复制）
-image_id         = "ocid1.image.oc1.ap-tokyo-1.aaaaaaaXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+# 镜像 ID 与 过滤器二选一
+# 1. 直接指定 image_id (最稳妥，一旦指定则忽略下面的过滤器)
+image_id         = ""
+# 2. 留空 image_id 触发自动发现，并在此指定匹配关键字 (如 "ubuntu 22.04" 或 "ubuntu-22.04")，留空默认匹配 "ubuntu"
+image_filter     = "ubuntu 22.04"
 subnet_id        = "ocid1.subnet.oc1.ap-tokyo-1.aaaaaaaXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 assign_public_ip = true
 ssh_public_key   = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC..."

@@ -57,6 +57,7 @@ func main() {
 		OCPUs:              cfg.Instance.OCPUs,
 		MemoryGB:           cfg.Instance.MemoryGB,
 		ImageID:            cfg.Instance.ImageID,
+		ImageFilter:        cfg.Instance.ImageFilter,
 		SubnetID:           cfg.Instance.SubnetID,
 		AssignPublicIP:     cfg.Instance.AssignPublicIP,
 		SSHPublicKey:       cfg.Instance.SSHPublicKey,

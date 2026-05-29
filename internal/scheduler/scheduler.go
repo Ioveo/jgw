@@ -156,7 +156,7 @@ func (s *Scheduler) tryLaunch() bool {
 
 		case apiErr.IsThrottled():
 			log.Printf("[WARN] ⚠️  触发限流 (429)，跳过当前 AD: %s", ad)
-			atomic.AddInt64(&s.consecutive, 1)
+			atomic.AddInt64(&s.consecutive, 3) // 触发限流时加大惩罚度，使退避时间快速拉长
 
 		case apiErr.IsOutOfCapacity():
 			log.Printf("[INFO] 💤 容量不足 (AD=%s): %s", ad, apiErr.Message)
@@ -196,9 +196,13 @@ func (s *Scheduler) initMetadata() error {
 	compID := s.cfg.InstanceConfig.CompartmentID
 	shape := s.cfg.InstanceConfig.Shape
 
-	// 1. 如果没有指定 ImageID，则动态搜寻符合条件的镜像（如 Ubuntu 22.04）
+	// 1. 如果没有指定 ImageID，则动态搜寻符合条件的镜像（支持自定义过滤器如 "ubuntu 22.04"）
 	if s.cfg.InstanceConfig.ImageID == "" {
-		log.Printf("[INFO] 🔍 检测到 ImageID 为空，开始自动适配 '%s' 的 Ubuntu 镜像...", shape)
+		filter := strings.ToLower(s.cfg.InstanceConfig.ImageFilter)
+		if filter == "" {
+			filter = "ubuntu"
+		}
+		log.Printf("[INFO] 🔍 检测到 ImageID 为空，开始自动适配 '%s' 且包含关键字 '%s' 的镜像...", shape, filter)
 		images, apiErr := s.cfg.Client.ListImages(compID, shape)
 		if apiErr != nil {
 			return fmt.Errorf("动态获取镜像列表失败: %v", apiErr)
@@ -207,9 +211,22 @@ func (s *Scheduler) initMetadata() error {
 		var targetImage *oci.ImageInfo
 		for _, img := range images {
 			displayLower := strings.ToLower(img.DisplayName)
-			if img.LifecycleState != "AVAILABLE" || !strings.Contains(displayLower, "ubuntu") {
+			if img.LifecycleState != "AVAILABLE" {
 				continue
 			}
+
+			// 匹配过滤关键字（支持多关键字空格分隔，如 "ubuntu 22.04"）
+			matched := true
+			for _, part := range strings.Fields(filter) {
+				if !strings.Contains(displayLower, part) {
+					matched = false
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+
 			// A1 运行 ARM 需要 aarch64/arm64 架构镜像，同时兼容 oracle 不同命名规范
 			if strings.Contains(shape, "A1") {
 				isArm := strings.Contains(displayLower, "aarch64") ||
@@ -226,7 +243,7 @@ func (s *Scheduler) initMetadata() error {
 		}
 
 		if targetImage == nil {
-			return fmt.Errorf("在当前 Region (%s) 未找到匹配的 Ubuntu 镜像，请在 config.toml 中手动指定 image_id", s.cfg.Client.GetRegion())
+			return fmt.Errorf("在当前 Region (%s) 未找到匹配 '%s' 的镜像，请调整 image_filter 或在配置中手动指定 image_id", s.cfg.Client.GetRegion(), filter)
 		}
 
 		s.cfg.InstanceConfig.ImageID = targetImage.ID

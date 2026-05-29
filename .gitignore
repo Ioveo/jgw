@@ -19,3 +19,4 @@ logs/
 .tools/
 .DS_Store
 Thumbs.db
+.opencode

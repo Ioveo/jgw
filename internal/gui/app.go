@@ -68,6 +68,7 @@ type GUIApp struct {
 	ocpus          *widget.Entry
 	memoryGB       *widget.Entry
 	imageID        *widget.Entry
+	imageFilter    *widget.Entry
 	subnetID       *widget.Entry
 	sshKey         *widget.Entry
 	assignPublicIP *widget.Check
@@ -290,18 +291,174 @@ func (g *GUIApp) buildAuthTab() fyne.CanvasObject {
 }
 
 func (g *GUIApp) buildInstanceTab() fyne.CanvasObject {
-	return container.NewScroll(widget.NewForm(
+	fetchBtn := widget.NewButtonWithIcon("🔍 一键获取资源 ID（镜像 / 子网 / 可用域）", theme.SearchIcon(), func() {
+		go g.autoFetchResources()
+	})
+	fetchBtn.Importance = widget.WarningImportance
+
+	hint := widget.NewLabelWithStyle(
+		"填好「认证」标签页 + Compartment ID 后，点击下方按钮自动获取并填入资源 ID",
+		fyne.TextAlignLeading,
+		fyne.TextStyle{Italic: true},
+	)
+
+	form := widget.NewForm(
 		widget.NewFormItem("Compartment ID", g.compartmentID),
 		widget.NewFormItem("可用域 (留空=自动)", g.adEntry),
 		widget.NewFormItem("实例名称", g.displayName),
 		widget.NewFormItem("规格 (Shape)", g.shapeSelect),
 		widget.NewFormItem("OCPU 数量", g.ocpus),
 		widget.NewFormItem("内存 (GB)", g.memoryGB),
-		widget.NewFormItem("镜像 ID", g.imageID),
-		widget.NewFormItem("子网 ID", g.subnetID),
+		widget.NewFormItem("镜像 ID (留空=自动)", g.imageID),
+		widget.NewFormItem("镜像过滤器 (如 22.04)", g.imageFilter),
+		widget.NewFormItem("子网 ID (留空=自动)", g.subnetID),
 		widget.NewFormItem("SSH 公钥", g.sshKey),
 		widget.NewFormItem("分配公网 IP", g.assignPublicIP),
-	))
+	)
+
+	return container.NewScroll(container.NewVBox(hint, fetchBtn, form))
+}
+
+// autoFetchResources 一键从 OCI API 获取镜像、子网、可用域并自动填入 GUI
+func (g *GUIApp) autoFetchResources() {
+	// ── 校验必要的认证与 Compartment 字段 ──
+	tenancy := strings.TrimSpace(g.tenancyOCID.Text)
+	user := strings.TrimSpace(g.userOCID.Text)
+	fp := strings.TrimSpace(g.fingerprint.Text)
+	keyPath := strings.TrimSpace(g.privateKeyPath.Text)
+	region := g.regionSelect.Selected
+	compID := strings.TrimSpace(g.compartmentID.Text)
+
+	if tenancy == "" || user == "" || fp == "" || keyPath == "" || region == "" {
+		dialog.ShowError(fmt.Errorf("请先完成「认证」标签页的所有必填项（Tenancy / User / Fingerprint / 私钥 / Region）"), g.win)
+		return
+	}
+	if compID == "" {
+		dialog.ShowError(fmt.Errorf("请先填写 Compartment ID（通常与 Tenancy OCID 相同）"), g.win)
+		return
+	}
+
+	log.Println("[INFO] 🔍 开始一键获取 OCI 资源 ID...")
+
+	// ── 创建临时 OCI 客户端 ──
+	client := oci.NewClient(oci.ClientConfig{
+		TenancyOCID:    tenancy,
+		UserOCID:       user,
+		Fingerprint:    fp,
+		PrivateKeyPath: keyPath,
+		Region:         region,
+	})
+
+	shape := g.shapeSelect.Selected
+	filter := strings.ToLower(strings.TrimSpace(g.imageFilter.Text))
+	if filter == "" {
+		filter = "ubuntu"
+	}
+
+	var results []string
+
+	// ── 1. 获取镜像 ──
+	images, apiErr := client.ListImages(compID, shape)
+	if apiErr != nil {
+		results = append(results, fmt.Sprintf("❌ 获取镜像列表失败: %s", apiErr.Message))
+	} else {
+		var targetImage *oci.ImageInfo
+		for _, img := range images {
+			displayLower := strings.ToLower(img.DisplayName)
+			if img.LifecycleState != "AVAILABLE" {
+				continue
+			}
+			// 匹配所有过滤关键字
+			matched := true
+			for _, part := range strings.Fields(filter) {
+				if !strings.Contains(displayLower, part) {
+					matched = false
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+			// ARM 架构检查
+			if strings.Contains(shape, "A1") {
+				isArm := strings.Contains(displayLower, "aarch64") ||
+					strings.Contains(displayLower, "arm64") ||
+					strings.Contains(displayLower, "arm")
+				if !isArm {
+					continue
+				}
+			}
+			imgCopy := img
+			targetImage = &imgCopy
+			break
+		}
+		if targetImage != nil {
+			g.imageID.SetText(targetImage.ID)
+			results = append(results, fmt.Sprintf("✅ 镜像: %s\n    ID: %s", targetImage.DisplayName, targetImage.ID))
+			log.Printf("[INFO] ✓ 自动获取镜像: %s", targetImage.DisplayName)
+		} else {
+			results = append(results, fmt.Sprintf("⚠️ 未找到匹配 '%s' 的 %s 镜像（共 %d 个镜像可用）", filter, shape, len(images)))
+		}
+	}
+
+	// ── 2. 获取 VCN + 子网 ──
+	vcns, apiErr := client.ListVcns(compID)
+	if apiErr != nil {
+		results = append(results, fmt.Sprintf("❌ 获取 VCN 列表失败: %s", apiErr.Message))
+	} else if len(vcns) == 0 {
+		results = append(results, "⚠️ 当前 Compartment 内无虚拟云网络 (VCN)，请先在控制台创建")
+	} else {
+		var targetVcn *oci.VcnInfo
+		for _, v := range vcns {
+			if v.LifecycleState == "AVAILABLE" {
+				vCopy := v
+				targetVcn = &vCopy
+				break
+			}
+		}
+		if targetVcn != nil {
+			subnets, subErr := client.ListSubnets(compID, targetVcn.ID)
+			if subErr != nil {
+				results = append(results, fmt.Sprintf("❌ 获取子网列表失败: %s", subErr.Message))
+			} else {
+				var targetSubnet *oci.SubnetInfo
+				for _, sub := range subnets {
+					if sub.LifecycleState == "AVAILABLE" {
+						subCopy := sub
+						targetSubnet = &subCopy
+						break
+					}
+				}
+				if targetSubnet != nil {
+					g.subnetID.SetText(targetSubnet.ID)
+					results = append(results, fmt.Sprintf("✅ VCN: %s → 子网: %s\n    ID: %s", targetVcn.DisplayName, targetSubnet.DisplayName, targetSubnet.ID))
+					log.Printf("[INFO] ✓ 自动获取子网: %s (VCN: %s)", targetSubnet.DisplayName, targetVcn.DisplayName)
+				} else {
+					results = append(results, fmt.Sprintf("⚠️ VCN「%s」下没有可用子网", targetVcn.DisplayName))
+				}
+			}
+		} else {
+			results = append(results, "⚠️ 所有 VCN 均不可用（非 AVAILABLE 状态）")
+		}
+	}
+
+	// ── 3. 获取可用域 ──
+	ads, apiErr := client.ListAvailabilityDomains(compID)
+	if apiErr != nil {
+		results = append(results, fmt.Sprintf("❌ 获取可用域失败: %s", apiErr.Message))
+	} else {
+		adNames := make([]string, 0, len(ads))
+		for _, ad := range ads {
+			adNames = append(adNames, ad.Name)
+		}
+		results = append(results, fmt.Sprintf("✅ 可用域 (%d 个): %s", len(ads), strings.Join(adNames, ", ")))
+		log.Printf("[INFO] ✓ 发现 %d 个可用域: %v", len(ads), adNames)
+	}
+
+	// ── 显示结果 ──
+	summary := strings.Join(results, "\n\n")
+	log.Printf("[INFO] 🔍 一键获取完成")
+	dialog.ShowInformation("🔍 自动获取结果", summary, g.win)
 }
 
 func (g *GUIApp) buildSchedulerTab() fyne.CanvasObject {
@@ -366,6 +523,8 @@ func (g *GUIApp) initWidgets() {
 	g.memoryGB.SetText("24")
 	g.imageID = widget.NewEntry()
 	g.imageID.SetPlaceHolder("ocid1.image.oc1.ap-tokyo-1.aaaaa...")
+	g.imageFilter = widget.NewEntry()
+	g.imageFilter.SetPlaceHolder("支持模糊匹配，留空默认 'ubuntu'")
 	g.subnetID = widget.NewEntry()
 	g.subnetID.SetPlaceHolder("ocid1.subnet.oc1.ap-tokyo-1.aaaaa...")
 	g.sshKey = widget.NewMultiLineEntry()
@@ -415,6 +574,7 @@ func (g *GUIApp) applyConfig(cfg *config.Config) {
 	g.ocpus.SetText(fmt.Sprintf("%.0f", cfg.Instance.OCPUs))
 	g.memoryGB.SetText(fmt.Sprintf("%.0f", cfg.Instance.MemoryGB))
 	g.imageID.SetText(cfg.Instance.ImageID)
+	g.imageFilter.SetText(cfg.Instance.ImageFilter)
 	g.subnetID.SetText(cfg.Instance.SubnetID)
 	g.sshKey.SetText(cfg.Instance.SSHPublicKey)
 	g.assignPublicIP.SetChecked(cfg.Instance.AssignPublicIP)
@@ -461,6 +621,7 @@ func (g *GUIApp) collectConfig() *config.Config {
 			OCPUs:              parseFloat(g.ocpus.Text, 4),
 			MemoryGB:           parseFloat(g.memoryGB.Text, 24),
 			ImageID:            strings.TrimSpace(g.imageID.Text),
+			ImageFilter:        strings.TrimSpace(g.imageFilter.Text),
 			SubnetID:           strings.TrimSpace(g.subnetID.Text),
 			AssignPublicIP:     g.assignPublicIP.Checked,
 			SSHPublicKey:       strings.TrimSpace(g.sshKey.Text),
@@ -521,6 +682,7 @@ func (g *GUIApp) startGrabbing() {
 		OCPUs:              cfg.Instance.OCPUs,
 		MemoryGB:           cfg.Instance.MemoryGB,
 		ImageID:            cfg.Instance.ImageID,
+		ImageFilter:        cfg.Instance.ImageFilter,
 		SubnetID:           cfg.Instance.SubnetID,
 		AssignPublicIP:     cfg.Instance.AssignPublicIP,
 		SSHPublicKey:       cfg.Instance.SSHPublicKey,

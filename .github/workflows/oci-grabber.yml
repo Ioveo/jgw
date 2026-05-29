@@ -44,16 +44,18 @@ jobs:
           OCI_MEMORY_GB:              "24"
           OCI_ASSIGN_PUBLIC_IP:       "true"
 
-          # 留空 → 程序自动搜索最新 Ubuntu ARM 镜像 + 默认子网
+          # 留空 → 程序自动搜索匹配过滤条件的镜像 + 默认子网
           OCI_IMAGE_ID:               ""
+          # 镜像名称过滤器（例如 "ubuntu 22.04"，支持空格分隔多关键字模糊匹配。留空默认匹配 "ubuntu"）
+          OCI_IMAGE_FILTER:           "ubuntu 22.04"
           OCI_SUBNET_ID:              ""
 
           # ── 调度参数 ──────────────────────────────────────────────────────
-          # 每轮 Action 最多尝试 25 次（约 25 分钟），配合 30 分钟 cron 无缝轮转
-          OCI_INTERVAL_SECONDS:       "60"
-          OCI_JITTER_SECONDS:         "10"
-          OCI_MAX_BACKOFF_SECONDS:    "120"
-          OCI_MAX_ATTEMPTS:           "25"
+          # 每轮 Action 尝试抢机，配合 30 分钟 cron 无缝轮转
+          OCI_INTERVAL_SECONDS:       "120"  # 初始间隔提高到 120 秒，降低初期 429 概率
+          OCI_JITTER_SECONDS:         "15"   # 随机抖动时间
+          OCI_MAX_BACKOFF_SECONDS:    "300"  # 发生 429 限流时，最大退避时间提高到 5 分钟，确保能解除限流
+          OCI_MAX_ATTEMPTS:           "12"   # 每轮最多尝试 12 次，配合 2 分钟初始间隔和退避算法，刚好运行约 25 分钟
 
           # ── 通知 (可选，填入 Secrets) ─────────────────────────────────────
           OCI_WEBHOOK_URL:            ${{ secrets.OCI_WEBHOOK_URL }}
