@@ -20,6 +20,8 @@ type InstanceConfig struct {
 	SubnetID           string
 	AssignPublicIP     bool
 	SSHPublicKey       string
+	BootVolumeSizeGB   int    // 引导卷大小 (GB)，0 表示使用镜像默认值（通常 46.6GB）
+	BootVolumeVPU      int    // 引导卷性能 (VPU/GB)：10=均衡, 20=高性能, 30~120=超高性能，0 表示默认(10)
 }
 
 // LaunchInstance 调用 OCI API 创建实例
@@ -32,8 +34,10 @@ func (c *Client) LaunchInstance(cfg InstanceConfig, ad string) (*Instance, *APIE
 		DisplayName:        cfg.DisplayName,
 		Shape:              cfg.Shape,
 		SourceDetails: InstanceSourceViaImageDetails{
-			SourceType: "image",
-			ImageID:    cfg.ImageID,
+			SourceType:          "image",
+			ImageID:             cfg.ImageID,
+			BootVolumeSizeInGBs: cfg.BootVolumeSizeGB,
+			BootVolumeVpusPerGB: cfg.BootVolumeVPU,
 		},
 		CreateVnicDetails: CreateVnicDetails{
 			SubnetID:       cfg.SubnetID,

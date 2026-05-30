@@ -61,6 +61,8 @@ func main() {
 		SubnetID:           cfg.Instance.SubnetID,
 		AssignPublicIP:     cfg.Instance.AssignPublicIP,
 		SSHPublicKey:       cfg.Instance.SSHPublicKey,
+		BootVolumeSizeGB:   cfg.Instance.BootVolumeSizeGB,
+		BootVolumeVPU:      cfg.Instance.BootVolumeVPU,
 	}
 
 	sched := scheduler.New(scheduler.Config{

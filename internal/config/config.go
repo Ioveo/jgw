@@ -39,6 +39,8 @@ type InstanceConfig struct {
 	SubnetID           string  `toml:"subnet_id"`
 	AssignPublicIP     bool    `toml:"assign_public_ip"`
 	SSHPublicKey       string  `toml:"ssh_public_key"`
+	BootVolumeSizeGB   int     `toml:"boot_volume_size_gb"`   // 引导卷大小 (GB)，0=默认
+	BootVolumeVPU      int     `toml:"boot_volume_vpu"`       // 引导卷性能 (VPU/GB)，0=默认(10)
 }
 
 // SchedulerConfig 调度策略
@@ -112,6 +114,8 @@ func Load(path string) (*Config, error) {
 
 			cfg.Instance.OCPUs = parseFloatEnv("OCI_OCPUS", 4)
 			cfg.Instance.MemoryGB = parseFloatEnv("OCI_MEMORY_GB", 24)
+			cfg.Instance.BootVolumeSizeGB = parseIntEnv("OCI_BOOT_VOLUME_SIZE_GB", 0)
+			cfg.Instance.BootVolumeVPU = parseIntEnv("OCI_BOOT_VOLUME_VPU", 0)
 
 			// 解析布尔型环境变量
 			parseBoolEnv := func(k string, def bool) bool {

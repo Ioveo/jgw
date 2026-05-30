@@ -32,6 +32,7 @@ type Scheduler struct {
 	attempts     int64
 	consecutive  int64 // 连续失败次数（用于退避计算）
 	ads          []string  // 可用域列表
+	countdown    int64 // 剩余等待秒数
 }
 
 // New 创建调度器
@@ -81,12 +82,34 @@ func (s *Scheduler) Run() {
 		waitSec := s.calcWait()
 		log.Printf("[INFO] 等待 %ds 后重试...\n", waitSec)
 
+		// 倒计时更新逻辑
+		atomic.StoreInt64(&s.countdown, int64(waitSec))
+		ticker := time.NewTicker(time.Second)
+		
+		stopWait := false
+		for wait := waitSec; wait > 0 && !stopWait; {
+			select {
+			case <-s.stopCh:
+				stopWait = true
+			case <-ticker.C:
+				wait--
+				atomic.StoreInt64(&s.countdown, int64(wait))
+			}
+		}
+		ticker.Stop()
+		atomic.StoreInt64(&s.countdown, 0)
+
 		select {
 		case <-s.stopCh:
 			return
-		case <-time.After(time.Duration(waitSec) * time.Second):
+		default:
 		}
 	}
+}
+
+// Countdown 返回当前剩余等待秒数
+func (s *Scheduler) Countdown() int {
+	return int(atomic.LoadInt64(&s.countdown))
 }
 
 // Stop 停止调度器

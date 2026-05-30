@@ -72,6 +72,8 @@ type GUIApp struct {
 	subnetID       *widget.Entry
 	sshKey         *widget.Entry
 	assignPublicIP *widget.Check
+	bootVolumeSize *widget.Entry
+	bootVolumeVPU  *widget.Select
 
 	// ── Scheduler 标签页 ──
 	interval   *widget.Entry
@@ -314,6 +316,8 @@ func (g *GUIApp) buildInstanceTab() fyne.CanvasObject {
 		widget.NewFormItem("子网 ID (留空=自动)", g.subnetID),
 		widget.NewFormItem("SSH 公钥", g.sshKey),
 		widget.NewFormItem("分配公网 IP", g.assignPublicIP),
+		widget.NewFormItem("引导卷大小 (GB)", g.bootVolumeSize),
+		widget.NewFormItem("引导卷性能 (VPU)", g.bootVolumeVPU),
 	)
 
 	return container.NewScroll(container.NewVBox(hint, fetchBtn, form))
@@ -532,6 +536,18 @@ func (g *GUIApp) initWidgets() {
 	g.sshKey.SetMinRowsVisible(3)
 	g.assignPublicIP = widget.NewCheck("", nil)
 	g.assignPublicIP.SetChecked(true)
+	g.bootVolumeSize = widget.NewEntry()
+	g.bootVolumeSize.SetPlaceHolder("50 (留空或 0 = 使用镜像默认值，通常 46.6GB)")
+	g.bootVolumeVPU = widget.NewSelect([]string{
+		"0  - 默认 (均衡)",
+		"10 - 均衡",
+		"20 - 高性能",
+		"30 - 超高性能",
+		"60 - 超高性能+",
+		"90 - 超高性能++",
+		"120 - 极致性能",
+	}, nil)
+	g.bootVolumeVPU.SetSelected("0  - 默认 (均衡)")
 
 	// Scheduler
 	g.interval = widget.NewEntry()
@@ -578,6 +594,22 @@ func (g *GUIApp) applyConfig(cfg *config.Config) {
 	g.subnetID.SetText(cfg.Instance.SubnetID)
 	g.sshKey.SetText(cfg.Instance.SSHPublicKey)
 	g.assignPublicIP.SetChecked(cfg.Instance.AssignPublicIP)
+	if cfg.Instance.BootVolumeSizeGB > 0 {
+		g.bootVolumeSize.SetText(strconv.Itoa(cfg.Instance.BootVolumeSizeGB))
+	} else {
+		g.bootVolumeSize.SetText("")
+	}
+	// 根据 VPU 值选中对应的下拉项
+	vpuMap := map[int]string{
+		0: "0  - 默认 (均衡)", 10: "10 - 均衡", 20: "20 - 高性能",
+		30: "30 - 超高性能", 60: "60 - 超高性能+",
+		90: "90 - 超高性能++", 120: "120 - 极致性能",
+	}
+	if label, ok := vpuMap[cfg.Instance.BootVolumeVPU]; ok {
+		g.bootVolumeVPU.SetSelected(label)
+	} else {
+		g.bootVolumeVPU.SetSelected("0  - 默认 (均衡)")
+	}
 
 	g.interval.SetText(strconv.Itoa(cfg.Scheduler.IntervalSeconds))
 	g.jitter.SetText(strconv.Itoa(cfg.Scheduler.JitterSeconds))
@@ -625,6 +657,8 @@ func (g *GUIApp) collectConfig() *config.Config {
 			SubnetID:           strings.TrimSpace(g.subnetID.Text),
 			AssignPublicIP:     g.assignPublicIP.Checked,
 			SSHPublicKey:       strings.TrimSpace(g.sshKey.Text),
+			BootVolumeSizeGB:   parseInt(g.bootVolumeSize.Text, 0),
+			BootVolumeVPU:      parseVPU(g.bootVolumeVPU.Selected),
 		},
 		Scheduler: config.SchedulerConfig{
 			IntervalSeconds:   parseInt(g.interval.Text, 60),
@@ -638,6 +672,19 @@ func (g *GUIApp) collectConfig() *config.Config {
 			TelegramChatID:   strings.TrimSpace(g.tgChatID.Text),
 		},
 	}
+}
+
+// parseVPU 从下拉选项文本中提取 VPU 数字（如 "20 - 高性能" → 20）
+func parseVPU(selected string) int {
+	if selected == "" {
+		return 0
+	}
+	parts := strings.SplitN(selected, " ", 2)
+	v, err := strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return 0
+	}
+	return v
 }
 
 // ──────────────────────────────────────────────
@@ -686,6 +733,8 @@ func (g *GUIApp) startGrabbing() {
 		SubnetID:           cfg.Instance.SubnetID,
 		AssignPublicIP:     cfg.Instance.AssignPublicIP,
 		SSHPublicKey:       cfg.Instance.SSHPublicKey,
+		BootVolumeSizeGB:   cfg.Instance.BootVolumeSizeGB,
+		BootVolumeVPU:      cfg.Instance.BootVolumeVPU,
 	}
 
 	g.sched = scheduler.New(scheduler.Config{
@@ -699,8 +748,10 @@ func (g *GUIApp) startGrabbing() {
 	})
 	g.running = true
 
-	// 更新 attempts 显示（每秒轮询调度器计数器）
+	// 更新 attempts 显示及倒计时动画（每 500ms 轮询一次以保持动画流畅）
 	go func() {
+		spinners := []string{"🕛", "🕐", "🕑", "🕒", "🕓", "🕔", "🕕", "🕖", "🕗", "🕘", "🕙", "🕚"}
+		tickCount := 0
 		for {
 			g.mu.Lock()
 			if !g.running || g.sched == nil {
@@ -708,9 +759,18 @@ func (g *GUIApp) startGrabbing() {
 				return
 			}
 			n := g.sched.Attempts()
+			cd := g.sched.Countdown()
 			g.mu.Unlock()
+
 			g.attemptsLabel.SetText(fmt.Sprintf("尝试次数: %d", n))
-			time.Sleep(time.Second)
+			if cd > 0 {
+				emoji := spinners[tickCount % len(spinners)]
+				g.statusLabel.SetText(fmt.Sprintf("%s 运行中 (重试倒计时 %d 秒)", emoji, cd))
+			} else {
+				g.statusLabel.SetText("⚡ 运行中 (正在尝试创建...)")
+			}
+			tickCount++
+			time.Sleep(500 * time.Millisecond)
 		}
 	}()
 

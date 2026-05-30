@@ -21,8 +21,10 @@ type ShapeConfig struct {
 
 // InstanceSourceViaImageDetails 使用镜像创建实例
 type InstanceSourceViaImageDetails struct {
-	SourceType string `json:"sourceType"` // "image"
-	ImageID    string `json:"imageId"`
+	SourceType          string `json:"sourceType"`                    // "image"
+	ImageID             string `json:"imageId"`
+	BootVolumeSizeInGBs int    `json:"bootVolumeSizeInGBs,omitempty"` // 引导卷大小 (GB)，0 表示使用默认值
+	BootVolumeVpusPerGB int    `json:"bootVolumeVpusPerGB,omitempty"` // 引导卷性能 (VPU/GB)：10=均衡, 20=高性能, 30~120=超高性能
 }
 
 // CreateVnicDetails 网卡配置
