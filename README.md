@@ -1,5 +1,22 @@
 # 甲骨文OCI自动抢机脚本 (OCI Instance Auto-Grabber)
 
+## Linux 服务器一键安装
+
+在 Ubuntu/Debian/CentOS/RHEL 服务器上执行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ioveo/jgw/main/scripts/install-linux.sh | sudo bash
+```
+
+安装完成后查看运行状态：
+
+```bash
+systemctl status oci-grabber.service
+journalctl -u oci-grabber.service -f
+```
+
+默认安装目录为 `/opt/oci-grabber`，源码缓存目录为 `/opt/oci-grabber-src`。首次安装会根据 `config.example.toml` 生成 `config.toml`，请确认里面的 OCI 配置和 SSH 公钥已经填写正确。
+
 > 基于 Oracle Cloud Infrastructure (OCI) 官方 REST API，全自动轮询抢占免费 ARM 实例。
 
 ---
